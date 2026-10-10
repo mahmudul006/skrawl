@@ -32,6 +32,10 @@ const MIN_ZOOM = 0.1
 const MAX_ZOOM = 8
 const STICKY_DEFAULT = '#ffec99'
 const DOUBLE_TAP_MS = 320
+/** How long the pen must rest at the end of a stroke before it snaps into a clean shape. */
+const SNAP_HOLD_MS = 450
+/** Finger or mouse movement (in screen pixels) that still counts as holding still. */
+const SNAP_HOLD_SLOP = 6
 // Set when the host page blocks file downloads, e.g. an embedded preview.
 const CAN_DOWNLOAD = !import.meta.env.VITE_NO_DOWNLOAD
 
@@ -50,6 +54,8 @@ type Interaction =
   | { kind: 'marquee'; start: Point; base: string[] }
   | { kind: 'erase' }
   | { kind: 'laser' }
+  /** A pen stroke that was held still and snapped into a shape; further moves are ignored. */
+  | { kind: 'snapped' }
 
 interface Pinch {
   dist: number
@@ -71,7 +77,7 @@ interface Editor {
 interface Prefs {
   showGrid: boolean
   dark: boolean
-  autoShapes: boolean
+  snapOnHold: boolean
 }
 
 function loadJson<T>(key: string): T | null {
@@ -96,7 +102,7 @@ function loadPrefs(): Prefs {
   return {
     showGrid: stored.showGrid ?? true,
     dark: stored.dark ?? window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false,
-    autoShapes: stored.autoShapes ?? true,
+    snapOnHold: stored.snapOnHold ?? true,
   }
 }
 
@@ -156,6 +162,8 @@ export default function App() {
   const lastTap = useRef({ time: 0, x: 0, y: 0 })
   const clipboard = useRef<SkrawlElement[]>([])
   const animation = useRef(0)
+  const holdTimer = useRef(0)
+  const holdAnchor = useRef<{ x: number; y: number } | null>(null)
 
   // --- scene & history -------------------------------------------------------
 
@@ -682,6 +690,7 @@ export default function App() {
         setScene(snapshot.current)
         interaction.current = { kind: 'none' }
         setMarquee(undefined)
+        clearTimeout(holdTimer.current)
         pinch.current = {
           dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
           midX: (a.x + b.x) / 2,
@@ -824,6 +833,7 @@ export default function App() {
 
     switch (action.kind) {
       case 'none':
+      case 'snapped':
         return
       case 'laser':
         laser.current?.add(e.clientX, e.clientY)
@@ -902,6 +912,7 @@ export default function App() {
         if (!el) return
         if (el.type === 'freedraw') {
           replace({ ...el, points: [...(el.points ?? []), [world.x - el.x, world.y - el.y]] })
+          if (prefs.snapOnHold) waitForHold(el.id, e.clientX, e.clientY)
           return
         }
         let width = world.x - el.x
@@ -930,7 +941,33 @@ export default function App() {
     }
   }
 
+  /**
+   * Restarts the hold timer whenever the pen moves beyond a few pixels. If it then rests long
+   * enough, the stroke is snapped into a clean shape while the finger is still down.
+   */
+  const waitForHold = (id: string, x: number, y: number) => {
+    const anchor = holdAnchor.current
+    if (anchor && Math.hypot(x - anchor.x, y - anchor.y) <= SNAP_HOLD_SLOP) return
+    holdAnchor.current = { x, y }
+    clearTimeout(holdTimer.current)
+    holdTimer.current = window.setTimeout(() => {
+      const action = interaction.current
+      if (action.kind !== 'create' || action.id !== id) return
+      const el = elementsRef.current.find((x) => x.id === id)
+      if (!el) return
+      const stroke = normalizeFreedraw(el)
+      const kind = recognizeStroke(stroke)
+      if (!kind) return
+      const shape = toShape(stroke, kind, style.backgroundColor)
+      setScene(elementsRef.current.map((x) => (x.id === id ? shape : x)))
+      interaction.current = { kind: 'snapped' }
+      navigator.vibrate?.(12)
+    }, SNAP_HOLD_MS)
+  }
+
   const onPointerUp = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    clearTimeout(holdTimer.current)
+    holdAnchor.current = null
     pointers.current.delete(e.pointerId)
     if (pinch.current) {
       if (pointers.current.size < 2) pinch.current = null
@@ -960,18 +997,7 @@ export default function App() {
         setScene(rest)
         return
       }
-      const kind = done.type === 'freedraw' && prefs.autoShapes ? recognizeStroke(done) : null
-      if (kind && done.type === 'freedraw') {
-        const sketch = done
-        const shape = toShape(sketch, kind, style.backgroundColor)
-        setScene(els.map((x) => (x.id === el.id ? shape : x)))
-        notify(`Turned into ${kind === 'ellipse' ? 'an ellipse' : `a ${kind}`}`, {
-          label: 'Keep sketch',
-          onClick: () => setScene(elementsRef.current.map((x) => (x.id === shape.id ? sketch : x))),
-        })
-      } else {
-        setScene(els.map((x) => (x.id === el.id ? done! : x)))
-      }
+      setScene(els.map((x) => (x.id === el.id ? done! : x)))
       if (SELECT_AFTER.includes(tool)) {
         setTool('select')
         select([done.id])
@@ -1175,7 +1201,7 @@ export default function App() {
               onDuplicate={duplicate}
               onDelete={deleteSelected}
               onLayer={layer}
-              autoShapes={tool === 'freedraw' ? { on: prefs.autoShapes, toggle: () => setPrefs((p) => ({ ...p, autoShapes: !p.autoShapes })) } : undefined}
+              snapOnHold={tool === 'freedraw' ? { on: prefs.snapOnHold, toggle: () => setPrefs((p) => ({ ...p, snapOnHold: !p.snapOnHold })) } : undefined}
             />
           )}
           <footer className="footer">
@@ -1216,7 +1242,7 @@ export default function App() {
       {empty && !editor && (
         <div className="welcome">
           <h1>Skrawl</h1>
-          <p>Pick a tool and start sketching. Draw a rough circle or box with the pen and it snaps into shape.</p>
+          <p>Pick a tool and start sketching. Draw a rough circle or box with the pen, then hold still for a moment to snap it into shape.</p>
           <p className="welcome-hint">Scroll or use the hand to pan · Ctrl + scroll or pinch to zoom · Double-click to write</p>
         </div>
       )}

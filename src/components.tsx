@@ -77,7 +77,7 @@ interface StylePanelProps {
   onDuplicate: () => void
   onDelete: () => void
   onLayer: (move: LayerMove) => void
-  autoShapes?: { on: boolean; toggle: () => void }
+  snapOnHold?: { on: boolean; toggle: () => void }
 }
 
 export function StylePanel(props: StylePanelProps) {
@@ -128,11 +128,11 @@ export function StylePanel(props: StylePanelProps) {
           ))}
         </div>
       </div>
-      {props.autoShapes && (
+      {props.snapOnHold && (
         <label className="toggle">
-          <input type="checkbox" id="auto-shapes" checked={props.autoShapes.on} onChange={props.autoShapes.toggle} />
-          <span>Auto-shapes</span>
-          <small>Turns rough circles, boxes and lines into clean shapes</small>
+          <input type="checkbox" id="snap-on-hold" checked={props.snapOnHold.on} onChange={props.snapOnHold.toggle} />
+          <span>Hold to snap</span>
+          <small>Pause before lifting the pen to turn a stroke into a clean line, box, diamond or circle</small>
         </label>
       )}
       {selectionCount > 0 && (

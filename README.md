@@ -19,7 +19,7 @@ Then open http://localhost:5173.
 **Drawing**
 - Rectangle, diamond, ellipse, arrow, line, pen, text and sticky notes, all with a hand-drawn rough.js look
 - Stroke color, fill and stroke width
-- **Auto-shapes:** draw a rough circle, box, diamond or straight line with the pen and it snaps into a clean shape (tap "Keep sketch" to undo just that)
+- **Hold to snap:** draw a rough circle, box, diamond or straight line with the pen, then hold still for a moment before lifting and it snaps into a clean shape. Strokes you lift normally are never changed. Turn it off in the style panel
 - Labels inside shapes and on arrows: double-click (or double-tap) a shape to write in it
 
 **Editing**
@@ -73,7 +73,7 @@ src/
   scene.ts        Canvas rendering, selection handles, PNG export
   geometry.ts     Bounds, rotation, hit testing, shape outlines
   ops.ts          Arrow binding, resize/rotate, clone, layer order, loading saved data
-  recognize.ts    Auto-shapes: classifies pen strokes as lines, boxes, diamonds or ellipses
+  recognize.ts    Hold to snap: classifies pen strokes as lines, boxes, diamonds or ellipses
   share.ts        Share links (compressed into the URL fragment)
   mermaid.ts      Mermaid flowchart import and layout
   svg.ts          SVG export
