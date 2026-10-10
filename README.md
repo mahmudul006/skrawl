@@ -3,6 +3,8 @@
 A hand-drawn style whiteboard, inspired by [Excalidraw](https://excalidraw.com).
 Built with React, TypeScript, Vite and [rough.js](https://roughjs.com).
 
+**Live:** https://mahmudul006.github.io/skrawl/ (deployed from `main` by GitHub Actions)
+
 ## Getting started
 
 ```bash
