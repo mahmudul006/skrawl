@@ -1,0 +1,235 @@
+.app {
+  position: fixed;
+  inset: 0;
+  user-select: none;
+}
+
+.board {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+}
+
+.panel {
+  position: absolute;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.toolbar {
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  max-width: calc(100vw - 32px);
+  overflow-x: auto;
+}
+
+.tool {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  flex: none;
+}
+
+.tool:hover {
+  background: #f1f1f5;
+}
+
+.tool.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tool-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.tool-key {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.style-panel {
+  top: 76px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.swatches {
+  display: flex;
+  gap: 4px;
+}
+
+.swatch,
+.width-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  background: #fff;
+}
+
+.swatch.transparent {
+  background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 10px 10px;
+}
+
+.swatch.active,
+.width-btn.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.width-btn {
+  display: grid;
+  place-items: center;
+}
+
+.width-btn span {
+  display: block;
+  width: 14px;
+  background: var(--text);
+  border-radius: 2px;
+}
+
+.menu {
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.text-btn {
+  border: 0;
+  background: transparent;
+  padding: 8px 12px;
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.text-btn:hover:not(:disabled) {
+  background: #f1f1f5;
+}
+
+.text-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.text-btn.danger {
+  color: var(--danger);
+  border: 1px solid var(--border);
+}
+
+.footer {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  gap: 8px;
+}
+
+.footer .panel {
+  position: static;
+}
+
+.group {
+  display: flex;
+  padding: 2px;
+}
+
+.icon-btn {
+  min-width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.icon-btn:hover {
+  background: #f1f1f5;
+}
+
+.zoom-label {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  min-width: 56px;
+}
+
+.welcome {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  pointer-events: none;
+  color: var(--muted);
+}
+
+.welcome h1 {
+  font-family: 'Caveat', cursive;
+  font-size: 72px;
+  margin: 0;
+  color: var(--accent);
+}
+
+.welcome p {
+  margin: 0;
+  padding: 0 16px;
+}
+
+.text-editor {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 1px dashed var(--accent);
+  background: transparent;
+  font-family: 'Caveat', 'Comic Sans MS', cursive;
+  font-weight: 500;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  min-width: 2ch;
+  field-sizing: content;
+}
+
+@media (max-width: 640px) {
+  .style-panel {
+    top: auto;
+    bottom: 72px;
+  }
+}
