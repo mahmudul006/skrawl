@@ -1,12 +1,23 @@
 import rough from 'roughjs'
 import type { RoughCanvas } from 'roughjs/bin/canvas'
 import type { Drawable, Options } from 'roughjs/bin/core'
+import { canRotate, center, corners, endPoint, getBounds, isLinear, rotate, startPoint, unionBounds } from './geometry'
+import {
+  LABEL_SIZE,
+  LINE_HEIGHT,
+  STICKY_PADDING,
+  STICKY_SIZE,
+  TEXT_SIZE,
+  UI_FONT,
+  handFont,
+  wrapText,
+} from './text'
 import type { Bounds, SkrawlElement, View } from './types'
 
-export const FONT_SIZE = 28
-export const LINE_HEIGHT = 1.2
-export const FONT = `500 ${FONT_SIZE}px "Caveat", "Comic Sans MS", cursive`
 export const SELECTION_COLOR = '#6965db'
+/** The canvas is always painted light; dark mode inverts it with a CSS filter. */
+export const CANVAS_BG = '#ffffff'
+const FRAME_COLOR = '#9a9aa6'
 const GRID_SIZE = 20
 
 const generator = rough.generator()
@@ -32,25 +43,39 @@ function drawablesFor(el: SkrawlElement): Drawable[] {
   const cached = drawableCache.get(el)
   if (cached) return cached
   const o = roughOptions(el)
+  const { x, y, width: w, height: h } = el
   let drawables: Drawable[] = []
   switch (el.type) {
     case 'rectangle':
-      drawables = [generator.rectangle(el.x, el.y, el.width, el.height, o)]
+      drawables = [generator.rectangle(x, y, w, h, o)]
       break
     case 'ellipse':
-      drawables = [generator.ellipse(el.x + el.width / 2, el.y + el.height / 2, el.width, el.height, o)]
+      drawables = [generator.ellipse(x + w / 2, y + h / 2, w, h, o)]
+      break
+    case 'diamond':
+      drawables = [
+        generator.polygon(
+          [
+            [x + w / 2, y],
+            [x + w, y + h / 2],
+            [x + w / 2, y + h],
+            [x, y + h / 2],
+          ],
+          o,
+        ),
+      ]
       break
     case 'line':
-      drawables = [generator.line(el.x, el.y, el.x + el.width, el.y + el.height, o)]
+      drawables = [generator.line(x, y, x + w, y + h, o)]
       break
     case 'arrow': {
-      const x2 = el.x + el.width
-      const y2 = el.y + el.height
-      const angle = Math.atan2(el.height, el.width)
-      const len = Math.min(24, Math.hypot(el.width, el.height) / 3)
+      const x2 = x + w
+      const y2 = y + h
+      const angle = Math.atan2(h, w)
+      const len = Math.min(24, Math.hypot(w, h) / 3)
       const head = (spread: number) =>
         generator.line(x2, y2, x2 - len * Math.cos(angle - spread), y2 - len * Math.sin(angle - spread), o)
-      drawables = [generator.line(el.x, el.y, x2, y2, o), head(0.45), head(-0.45)]
+      drawables = [generator.line(x, y, x2, y2, o), head(0.45), head(-0.45)]
       break
     }
   }
@@ -58,136 +83,210 @@ function drawablesFor(el: SkrawlElement): Drawable[] {
   return drawables
 }
 
-function drawFreedraw(ctx: CanvasRenderingContext2D, el: SkrawlElement) {
-  const pts = el.points ?? []
-  if (pts.length === 0) return
-  ctx.save()
-  ctx.strokeStyle = el.strokeColor
-  ctx.fillStyle = el.strokeColor
-  ctx.lineWidth = el.strokeWidth + 1
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-  if (pts.length === 1) {
-    ctx.beginPath()
-    ctx.arc(el.x + pts[0][0], el.y + pts[0][1], ctx.lineWidth / 2, 0, Math.PI * 2)
-    ctx.fill()
-  } else {
-    // Quadratic curves through segment midpoints smooth out pointer jitter.
-    ctx.beginPath()
-    ctx.moveTo(el.x + pts[0][0], el.y + pts[0][1])
-    for (let i = 1; i < pts.length - 1; i++) {
-      const mx = (pts[i][0] + pts[i + 1][0]) / 2
-      const my = (pts[i][1] + pts[i + 1][1]) / 2
-      ctx.quadraticCurveTo(el.x + pts[i][0], el.y + pts[i][1], el.x + mx, el.y + my)
-    }
-    const last = pts[pts.length - 1]
-    ctx.lineTo(el.x + last[0], el.y + last[1])
-    ctx.stroke()
+/** Smooth SVG/canvas path through freedraw points, using midpoints as curve ends. */
+export function freedrawPath(el: SkrawlElement): string {
+  const pts = (el.points ?? []).map(([px, py]) => [el.x + px, el.y + py])
+  if (pts.length === 0) return ''
+  if (pts.length === 1) return `M${pts[0][0]} ${pts[0][1]} L${pts[0][0] + 0.1} ${pts[0][1]}`
+  let d = `M${pts[0][0]} ${pts[0][1]}`
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mx = (pts[i][0] + pts[i + 1][0]) / 2
+    const my = (pts[i][1] + pts[i + 1][1]) / 2
+    d += ` Q${pts[i][0]} ${pts[i][1]} ${mx} ${my}`
   }
-  ctx.restore()
+  const last = pts[pts.length - 1]
+  return d + ` L${last[0]} ${last[1]}`
 }
 
-function drawText(ctx: CanvasRenderingContext2D, el: SkrawlElement) {
-  ctx.save()
-  ctx.font = FONT
-  ctx.fillStyle = el.strokeColor
-  ctx.textBaseline = 'top'
-  ;(el.text ?? '').split('\n').forEach((line, i) => {
-    ctx.fillText(line, el.x, el.y + i * FONT_SIZE * LINE_HEIGHT)
-  })
-  ctx.restore()
+/** Width available to a shape's centered label. */
+export function labelWidth(el: SkrawlElement) {
+  if (el.type === 'rectangle') return Math.max(20, el.width - 20)
+  return Math.max(20, el.width * 0.68)
 }
 
-export function drawElement(ctx: CanvasRenderingContext2D, rc: RoughCanvas, el: SkrawlElement) {
-  if (el.type === 'freedraw') drawFreedraw(ctx, el)
-  else if (el.type === 'text') drawText(ctx, el)
-  else drawablesFor(el).forEach((d) => rc.draw(d))
+export interface TextBlock {
+  lines: string[]
+  size: number
+  /** Top-left of the first line and the alignment to draw with. */
+  x: number
+  y: number
+  align: 'left' | 'center'
 }
 
-export function getBounds(el: SkrawlElement): Bounds {
-  if (el.type === 'freedraw') {
-    const pts = el.points ?? [[0, 0]]
-    const xs = pts.map((p) => el.x + p[0])
-    const ys = pts.map((p) => el.y + p[1])
-    return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) }
-  }
-  return {
-    minX: Math.min(el.x, el.x + el.width),
-    minY: Math.min(el.y, el.y + el.height),
-    maxX: Math.max(el.x, el.x + el.width),
-    maxY: Math.max(el.y, el.y + el.height),
-  }
-}
-
-function distToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
-  const dx = x2 - x1
-  const dy = y2 - y1
-  const lenSq = dx * dx + dy * dy
-  const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq))
-  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
-}
-
-export function hitTest(el: SkrawlElement, x: number, y: number, tolerance: number): boolean {
-  const b = getBounds(el)
+/** Where an element's text goes, shared by canvas, SVG and the in-place editor. */
+export function textLayout(el: SkrawlElement, text = el.text ?? ''): TextBlock | null {
   switch (el.type) {
+    case 'text': {
+      const size = el.fontSize ?? TEXT_SIZE
+      return { lines: text.split('\n'), size, x: el.x, y: el.y, align: 'left' }
+    }
+    case 'sticky': {
+      const lines = wrapText(text, STICKY_SIZE, el.width - STICKY_PADDING * 2)
+      return { lines, size: STICKY_SIZE, x: el.x + STICKY_PADDING, y: el.y + STICKY_PADDING, align: 'left' }
+    }
     case 'rectangle':
-    case 'text':
-      return x >= b.minX - tolerance && x <= b.maxX + tolerance && y >= b.minY - tolerance && y <= b.maxY + tolerance
-    case 'ellipse': {
-      const rx = (b.maxX - b.minX) / 2 + tolerance
-      const ry = (b.maxY - b.minY) / 2 + tolerance
-      const nx = (x - (b.minX + b.maxX) / 2) / rx
-      const ny = (y - (b.minY + b.maxY) / 2) / ry
-      return nx * nx + ny * ny <= 1
+    case 'ellipse':
+    case 'diamond': {
+      const lines = wrapText(text, LABEL_SIZE, labelWidth(el))
+      const h = lines.length * LABEL_SIZE * LINE_HEIGHT
+      return { lines, size: LABEL_SIZE, x: el.x + el.width / 2, y: el.y + el.height / 2 - h / 2, align: 'center' }
     }
     case 'line':
-    case 'arrow':
-      return distToSegment(x, y, el.x, el.y, el.x + el.width, el.y + el.height) <= tolerance
-    case 'freedraw': {
-      const pts = el.points ?? []
-      if (pts.length === 1) return Math.hypot(x - el.x - pts[0][0], y - el.y - pts[0][1]) <= tolerance
-      for (let i = 0; i < pts.length - 1; i++) {
-        const [ax, ay] = pts[i]
-        const [bx, by] = pts[i + 1]
-        if (distToSegment(x, y, el.x + ax, el.y + ay, el.x + bx, el.y + by) <= tolerance) return true
-      }
-      return false
+    case 'arrow': {
+      const lines = text.split('\n')
+      const h = lines.length * LABEL_SIZE * LINE_HEIGHT
+      return { lines, size: LABEL_SIZE, x: el.x + el.width / 2, y: el.y + el.height / 2 - h / 2, align: 'center' }
     }
+    default:
+      return null
   }
 }
 
-/** Topmost element under the point, if any. */
-export function elementAt(elements: SkrawlElement[], x: number, y: number, tolerance: number) {
-  for (let i = elements.length - 1; i >= 0; i--) {
-    if (hitTest(elements[i], x, y, tolerance)) return elements[i]
+function drawTextBlock(ctx: CanvasRenderingContext2D, block: TextBlock, color: string, background?: string) {
+  ctx.save()
+  ctx.font = handFont(block.size)
+  ctx.textBaseline = 'top'
+  ctx.textAlign = block.align
+  const lh = block.size * LINE_HEIGHT
+  if (background) {
+    const w = Math.max(...block.lines.map((l) => ctx.measureText(l).width))
+    ctx.fillStyle = background
+    ctx.fillRect(block.x - w / 2 - 6, block.y - 2, w + 12, block.lines.length * lh + 4)
   }
-  return undefined
+  ctx.fillStyle = color
+  block.lines.forEach((line, i) => ctx.fillText(line, block.x, block.y + i * lh))
+  ctx.restore()
 }
 
-/** Flip negative sizes so boxes always grow down-right from (x, y). */
-export function normalize(el: SkrawlElement): SkrawlElement {
-  if (el.type !== 'rectangle' && el.type !== 'ellipse') return el
-  if (el.width >= 0 && el.height >= 0) return el
-  const b = getBounds(el)
-  return { ...el, x: b.minX, y: b.minY, width: b.maxX - b.minX, height: b.maxY - b.minY }
+interface DrawOptions {
+  zoom: number
+  /** Device pixels per world unit, for effects that ignore the transform (shadows). */
+  scale: number
+  hideText?: boolean
+  exporting?: boolean
 }
 
-let measureCtx: CanvasRenderingContext2D | null = null
-export function measureText(text: string) {
-  measureCtx ??= document.createElement('canvas').getContext('2d')!
-  measureCtx.font = FONT
-  const lines = text.split('\n')
-  const width = Math.max(...lines.map((l) => measureCtx!.measureText(l).width))
-  return { width, height: lines.length * FONT_SIZE * LINE_HEIGHT }
+export function drawElement(ctx: CanvasRenderingContext2D, rc: RoughCanvas, el: SkrawlElement, opts: DrawOptions) {
+  ctx.save()
+  if (el.angle) {
+    const c = center(el)
+    ctx.translate(c.x, c.y)
+    ctx.rotate(el.angle)
+    ctx.translate(-c.x, -c.y)
+  }
+  switch (el.type) {
+    case 'freedraw': {
+      ctx.strokeStyle = el.strokeColor
+      ctx.lineWidth = el.strokeWidth + 1
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.stroke(new Path2D(freedrawPath(el)))
+      break
+    }
+    case 'frame': {
+      ctx.strokeStyle = FRAME_COLOR
+      ctx.lineWidth = 1 / opts.zoom
+      ctx.strokeRect(el.x, el.y, el.width, el.height)
+      if (!opts.exporting && !opts.hideText) {
+        ctx.font = `${12 / opts.zoom}px ${UI_FONT}`
+        ctx.fillStyle = FRAME_COLOR
+        ctx.textBaseline = 'bottom'
+        ctx.fillText(el.name || 'Frame', el.x, el.y - 6 / opts.zoom)
+      }
+      break
+    }
+    case 'sticky': {
+      ctx.save()
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.18)'
+      ctx.shadowBlur = 12 * opts.scale
+      ctx.shadowOffsetY = 3 * opts.scale
+      ctx.fillStyle = el.backgroundColor
+      ctx.fillRect(el.x, el.y, el.width, el.height)
+      ctx.restore()
+      break
+    }
+    case 'text':
+      break
+    default:
+      drawablesFor(el).forEach((d) => rc.draw(d))
+  }
+  if (!opts.hideText && el.text) {
+    const block = textLayout(el)
+    if (block) drawTextBlock(ctx, block, el.strokeColor, isLinear(el) ? CANVAS_BG : undefined)
+  }
+  ctx.restore()
 }
 
-interface RenderOptions {
+// --- handles -----------------------------------------------------------------
+
+export type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'rotate' | 'start' | 'end'
+
+export interface Handle {
+  id: HandleId
+  x: number
+  y: number
+}
+
+/** Handle positions in world space for a single selected element. */
+export function getHandles(el: SkrawlElement, zoom: number): Handle[] {
+  if (isLinear(el)) {
+    const s = startPoint(el)
+    const e = endPoint(el)
+    return [
+      { id: 'start', ...s },
+      { id: 'end', ...e },
+    ]
+  }
+  const pad = 6 / zoom
+  const c = center(el)
+  const { x, y, width: w, height: h } = el
+  const l = x - pad
+  const r = x + w + pad
+  const t = y - pad
+  const b = y + h + pad
+  const local: Handle[] = [
+    { id: 'nw', x: l, y: t },
+    { id: 'ne', x: r, y: t },
+    { id: 'se', x: r, y: b },
+    { id: 'sw', x: l, y: b },
+  ]
+  // Edge handles only fit when the element is big enough on screen, and text scales from corners.
+  if (el.type !== 'text' && w * zoom > 40 && h * zoom > 40) {
+    local.push({ id: 'n', x: x + w / 2, y: t }, { id: 'e', x: r, y: y + h / 2 })
+    local.push({ id: 's', x: x + w / 2, y: b }, { id: 'w', x: l, y: y + h / 2 })
+  }
+  if (canRotate(el)) local.push({ id: 'rotate', x: x + w / 2, y: t - 22 / zoom })
+  return local.map((hd) => ({ ...hd, ...rotate(hd, c, el.angle) }))
+}
+
+function outlineElement(ctx: CanvasRenderingContext2D, el: SkrawlElement, pad: number) {
+  ctx.beginPath()
+  if (isLinear(el)) {
+    ctx.moveTo(el.x, el.y)
+    ctx.lineTo(el.x + el.width, el.y + el.height)
+  } else {
+    const padded = { ...el, x: el.x - pad, y: el.y - pad, width: el.width + pad * 2, height: el.height + pad * 2 }
+    corners(padded).forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)))
+    ctx.closePath()
+  }
+  ctx.stroke()
+}
+
+// --- scene -------------------------------------------------------------------
+
+export interface RenderOptions {
   width: number
   height: number
   dpr: number
   view: View
-  selectedId: string | null
-  hiddenId?: string
+  selectedIds: string[]
+  /** Element whose text is being edited in place, so the canvas doesn't draw it twice. */
+  editingId?: string
+  /** Shape an arrow end will stick to if released here. */
+  bindTargetId?: string
+  marquee?: Bounds
+  /** While presenting, everything outside this frame is masked and frame borders are hidden. */
+  presentFrame?: Bounds
   showGrid: boolean
 }
 
@@ -195,59 +294,124 @@ export function renderScene(canvas: HTMLCanvasElement, elements: SkrawlElement[]
   const ctx = canvas.getContext('2d')!
   const rc = rough.canvas(canvas)
   const { view, dpr } = opts
+  const zoom = view.zoom
   ctx.setTransform(1, 0, 0, 1, 0, 0)
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  ctx.fillStyle = CANVAS_BG
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-  const scale = dpr * view.zoom
+  const scale = dpr * zoom
   ctx.setTransform(scale, 0, 0, scale, scale * view.scrollX, scale * view.scrollY)
+  const visible: Bounds = {
+    minX: -view.scrollX,
+    minY: -view.scrollY,
+    maxX: -view.scrollX + opts.width / zoom,
+    maxY: -view.scrollY + opts.height / zoom,
+  }
 
-  if (opts.showGrid && view.zoom >= 0.4) {
-    const x0 = -view.scrollX
-    const y0 = -view.scrollY
-    const x1 = x0 + opts.width / view.zoom
-    const y1 = y0 + opts.height / view.zoom
-    const dot = 1.5 / view.zoom
+  if (opts.showGrid && !opts.presentFrame && zoom >= 0.4) {
+    const dot = 1.5 / zoom
     ctx.fillStyle = '#d0d0d8'
-    for (let x = Math.floor(x0 / GRID_SIZE) * GRID_SIZE; x < x1; x += GRID_SIZE) {
-      for (let y = Math.floor(y0 / GRID_SIZE) * GRID_SIZE; y < y1; y += GRID_SIZE) {
+    for (let x = Math.floor(visible.minX / GRID_SIZE) * GRID_SIZE; x < visible.maxX; x += GRID_SIZE) {
+      for (let y = Math.floor(visible.minY / GRID_SIZE) * GRID_SIZE; y < visible.maxY; y += GRID_SIZE) {
         ctx.fillRect(x - dot / 2, y - dot / 2, dot, dot)
       }
     }
   }
 
+  const drawOpts = { zoom, scale }
+  const onScreen = (el: SkrawlElement) => {
+    const b = getBounds(el)
+    const m = 40 // room for labels, shadows and frame titles
+    return b.maxX + m >= visible.minX && b.minX - m <= visible.maxX && b.maxY + m >= visible.minY && b.minY - m <= visible.maxY
+  }
+  // Frames always sit underneath the content they hold.
+  if (!opts.presentFrame) {
+    for (const el of elements) {
+      if (el.type === 'frame' && onScreen(el)) drawElement(ctx, rc, el, { ...drawOpts, hideText: el.id === opts.editingId })
+    }
+  }
   for (const el of elements) {
-    if (el.id !== opts.hiddenId) drawElement(ctx, rc, el)
+    if (el.type !== 'frame' && onScreen(el)) drawElement(ctx, rc, el, { ...drawOpts, hideText: el.id === opts.editingId })
   }
 
-  const selected = elements.find((el) => el.id === opts.selectedId)
-  if (selected) {
-    const b = getBounds(selected)
-    const pad = 6 / view.zoom
-    ctx.save()
-    ctx.strokeStyle = SELECTION_COLOR
-    ctx.lineWidth = 1 / view.zoom
-    ctx.setLineDash([6 / view.zoom, 4 / view.zoom])
-    ctx.strokeRect(b.minX - pad, b.minY - pad, b.maxX - b.minX + pad * 2, b.maxY - b.minY + pad * 2)
-    ctx.restore()
+  if (opts.presentFrame) {
+    const f = opts.presentFrame
+    ctx.fillStyle = CANVAS_BG
+    ctx.fillRect(visible.minX, visible.minY, f.minX - visible.minX, visible.maxY - visible.minY)
+    ctx.fillRect(f.maxX, visible.minY, visible.maxX - f.maxX, visible.maxY - visible.minY)
+    ctx.fillRect(f.minX, visible.minY, f.maxX - f.minX, f.minY - visible.minY)
+    ctx.fillRect(f.minX, f.maxY, f.maxX - f.minX, visible.maxY - f.maxY)
+    return
   }
+
+  ctx.save()
+  ctx.strokeStyle = SELECTION_COLOR
+  ctx.lineWidth = 1 / zoom
+
+  const bindTarget = elements.find((el) => el.id === opts.bindTargetId)
+  if (bindTarget) {
+    ctx.lineWidth = 3 / zoom
+    ctx.globalAlpha = 0.5
+    outlineElement(ctx, bindTarget, 4 / zoom)
+    ctx.globalAlpha = 1
+    ctx.lineWidth = 1 / zoom
+  }
+
+  const selected = elements.filter((el) => opts.selectedIds.includes(el.id))
+  if (selected.length === 1) {
+    const el = selected[0]
+    ctx.setLineDash([6 / zoom, 4 / zoom])
+    if (!isLinear(el)) outlineElement(ctx, el, 6 / zoom)
+    ctx.setLineDash([])
+    const handles = getHandles(el, zoom)
+    const size = 9 / zoom
+    for (const hd of handles) {
+      ctx.fillStyle = '#ffffff'
+      ctx.beginPath()
+      if (hd.id === 'rotate' || hd.id === 'start' || hd.id === 'end') ctx.arc(hd.x, hd.y, size / 2 + 1 / zoom, 0, Math.PI * 2)
+      else ctx.rect(hd.x - size / 2, hd.y - size / 2, size, size)
+      ctx.fill()
+      ctx.stroke()
+    }
+  } else if (selected.length > 1) {
+    selected.forEach((el) => outlineElement(ctx, el, 3 / zoom))
+    const b = unionBounds(selected.map(getBounds))
+    const pad = 8 / zoom
+    ctx.setLineDash([6 / zoom, 4 / zoom])
+    ctx.strokeRect(b.minX - pad, b.minY - pad, b.maxX - b.minX + pad * 2, b.maxY - b.minY + pad * 2)
+  }
+
+  if (opts.marquee) {
+    const m = opts.marquee
+    ctx.setLineDash([])
+    ctx.fillStyle = 'rgba(105, 101, 219, 0.08)'
+    ctx.fillRect(m.minX, m.minY, m.maxX - m.minX, m.maxY - m.minY)
+    ctx.strokeRect(m.minX, m.minY, m.maxX - m.minX, m.maxY - m.minY)
+  }
+  ctx.restore()
 }
 
-/** Renders every element onto a white canvas cropped to the drawing. */
+/** Bounds of elements including room for labels, for exports and zoom-to-fit. */
+export function contentBounds(elements: SkrawlElement[]): Bounds | null {
+  if (elements.length === 0) return null
+  return unionBounds(elements.map(getBounds))
+}
+
+/** Renders the elements onto a white canvas cropped to the drawing. */
 export function exportToCanvas(elements: SkrawlElement[], padding = 24, scale = 2): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
-  if (elements.length === 0) return canvas
-  const bounds = elements.map(getBounds)
-  const minX = Math.min(...bounds.map((b) => b.minX)) - padding
-  const minY = Math.min(...bounds.map((b) => b.minY)) - padding
-  const maxX = Math.max(...bounds.map((b) => b.maxX)) + padding
-  const maxY = Math.max(...bounds.map((b) => b.maxY)) + padding
-  canvas.width = Math.ceil((maxX - minX) * scale)
-  canvas.height = Math.ceil((maxY - minY) * scale)
+  const b = contentBounds(elements)
+  if (!b) return canvas
+  const minX = b.minX - padding
+  const minY = b.minY - padding
+  canvas.width = Math.ceil((b.maxX - b.minX + padding * 2) * scale)
+  canvas.height = Math.ceil((b.maxY - b.minY + padding * 2) * scale)
   const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = '#ffffff'
+  ctx.fillStyle = CANVAS_BG
   ctx.fillRect(0, 0, canvas.width, canvas.height)
   ctx.setTransform(scale, 0, 0, scale, -minX * scale, -minY * scale)
   const rc = rough.canvas(canvas)
-  elements.forEach((el) => drawElement(ctx, rc, el))
+  const ordered = [...elements.filter((el) => el.type === 'frame'), ...elements.filter((el) => el.type !== 'frame')]
+  ordered.forEach((el) => drawElement(ctx, rc, el, { zoom: 1, scale, exporting: true }))
   return canvas
 }

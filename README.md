@@ -16,13 +16,26 @@ Then open http://localhost:5173.
 
 ## Features
 
-- Tools: select, hand, rectangle, ellipse, arrow, line, pen, text, eraser
-- Sketchy rough.js rendering with stroke color, fill and stroke width
-- Infinite canvas: scroll to pan, Ctrl/Cmd + scroll (or pinch) to zoom
-- Move shapes, double-click to edit text, Delete to remove
-- Undo / redo
-- Auto-saves to your browser (localStorage)
-- Export to PNG
+**Drawing**
+- Rectangle, diamond, ellipse, arrow, line, pen, text and sticky notes, all with a hand-drawn rough.js look
+- Stroke color, fill and stroke width
+- **Auto-shapes:** draw a rough circle, box, diamond or straight line with the pen and it snaps into a clean shape (tap "Keep sketch" to undo just that)
+- Labels inside shapes and on arrows: double-click (or double-tap) a shape to write in it
+
+**Editing**
+- Resize and rotate handles (hold Shift to keep proportions or snap rotation to 15°)
+- Multi-select by dragging a box or Shift-clicking; move, delete, restyle together
+- Copy, cut, paste and duplicate; bring forward / send backward
+- Arrows and lines stick to shapes and follow them when the shapes move
+- Undo / redo, auto-save in your browser
+
+**Presenting and sharing**
+- **Frames and presentation mode:** draw frames (F) around parts of the board, press Present, and step through them as slides
+- **Laser pointer** (K), also active while presenting
+- **Share by link:** the whole drawing is compressed into the link, so nothing is uploaded anywhere
+- **Mermaid import:** paste a `flowchart` / `graph` diagram (or use Menu → Import Mermaid) to get it as editable sketched shapes
+- Export to PNG or SVG
+- Dark mode, infinite canvas, pinch-zoom on touch screens
 
 ## Keyboard shortcuts
 
@@ -30,32 +43,48 @@ Then open http://localhost:5173.
 | --- | --- |
 | V | Select |
 | H / hold Space | Pan |
-| R | Rectangle |
-| O | Ellipse |
-| A | Arrow |
-| L | Line |
+| R / D / O | Rectangle / Diamond / Ellipse |
+| A / L | Arrow / Line |
 | P | Pen |
 | T | Text |
+| N | Sticky note |
+| F | Frame |
+| K | Laser pointer |
 | E | Eraser |
-| Shift while drawing | Square / circle |
-| Ctrl/Cmd + Z | Undo |
-| Ctrl/Cmd + Shift + Z | Redo |
-| Delete / Backspace | Delete selected |
-| Esc | Deselect |
+| Double-click | Write text, or edit a shape's label |
+| Enter | Edit the selected shape's label |
+| Shift while drawing | Square / circle, or 15° steps for lines |
+| Ctrl/Cmd + Z / Shift + Z | Undo / Redo |
+| Ctrl/Cmd + A | Select all |
+| Ctrl/Cmd + C / X / V | Copy / Cut / Paste |
+| Ctrl/Cmd + D | Duplicate |
+| Ctrl/Cmd + ] / [ | Bring forward / Send backward (add Shift for front / back) |
+| Arrow keys | Nudge selection (Shift for 10px) |
+| Delete / Backspace | Delete selection |
+| While presenting: → / ← / Esc | Next / Previous / Exit |
 
 ## Project layout
 
 ```
 src/
-  App.tsx    UI, tools, pointer + keyboard handling, history
-  scene.ts   Rendering, hit testing, export
-  types.ts   Element and view types
+  App.tsx         State, pointer and keyboard handling, history, dialogs
+  components.tsx  Toolbar, style panel, menu, toast, dialog, presentation bar
+  constants.ts    Tools, palettes and shared UI types
+  scene.ts        Canvas rendering, selection handles, PNG export
+  geometry.ts     Bounds, rotation, hit testing, shape outlines
+  ops.ts          Arrow binding, resize/rotate, clone, layer order, loading saved data
+  recognize.ts    Auto-shapes: classifies pen strokes as lines, boxes, diamonds or ellipses
+  share.ts        Share links (compressed into the URL fragment)
+  mermaid.ts      Mermaid flowchart import and layout
+  svg.ts          SVG export
+  laser.ts        Laser pointer trail
+  text.ts         Fonts, text measuring and wrapping
+  types.ts        Element and view types
 ```
 
 ## Ideas for next steps
 
-- Resize and rotate handles, multi-select
-- Live collaboration (e.g. Yjs + WebRTC)
-- AI: clean up rough sketches, text-to-diagram
-- Presentation mode using frames
-- SVG export, Mermaid import
+- Live collaboration (e.g. Yjs with a hosted sync server)
+- AI: text-to-diagram and sketch cleanup (needs a small serverless function to keep the API key private)
+- Image paste and upload
+- Group / ungroup, alignment tools
