@@ -19,7 +19,7 @@
 }
 
 .toolbar {
-  top: 16px;
+  top: calc(16px + env(safe-area-inset-top, 0px));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -63,7 +63,7 @@
 }
 
 .style-panel {
-  top: 76px;
+  top: calc(76px + env(safe-area-inset-top, 0px));
   left: 16px;
   display: flex;
   flex-direction: column;
@@ -121,7 +121,7 @@
 }
 
 .menu {
-  top: 16px;
+  top: calc(16px + env(safe-area-inset-top, 0px));
   right: 16px;
   display: flex;
   flex-direction: column;
@@ -155,7 +155,7 @@
 .footer {
   position: absolute;
   left: 16px;
-  bottom: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   display: flex;
   gap: 8px;
 }
@@ -228,8 +228,28 @@
 }
 
 @media (max-width: 640px) {
+  .tool {
+    width: 36px;
+    height: 36px;
+  }
+
+  .tool-key {
+    display: none;
+  }
+
   .style-panel {
     top: auto;
-    bottom: 72px;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .menu {
+    top: calc(68px + env(safe-area-inset-top, 0px));
+  }
+
+  .text-btn {
+    padding: 6px 10px;
+    font-size: 13px;
   }
 }

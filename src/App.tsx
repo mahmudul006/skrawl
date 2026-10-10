@@ -21,6 +21,8 @@ const FILL_COLORS = ['transparent', '#ffc9c9', '#b2f2bb', '#a5d8ff', '#ffec99']
 const STROKE_WIDTHS = [1, 2, 4]
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 8
+// Set when the host page blocks file downloads, e.g. an embedded preview.
+const CAN_DOWNLOAD = !import.meta.env.VITE_NO_DOWNLOAD
 
 const TOOLS: { tool: Tool; label: string; key: string; icon: string }[] = [
   { tool: 'select', label: 'Select', key: 'v', icon: '↖' },
@@ -40,6 +42,13 @@ type Interaction =
   | { kind: 'create'; id: string }
   | { kind: 'move'; id: string; startX: number; startY: number; origX: number; origY: number }
   | { kind: 'erase' }
+
+interface Pinch {
+  dist: number
+  midX: number
+  midY: number
+  view: View
+}
 
 interface TextEditor {
   id: string | null
@@ -75,8 +84,11 @@ export default function App() {
   const [size, setSize] = useState({ width: window.innerWidth, height: window.innerHeight })
   const [spaceHeld, setSpaceHeld] = useState(false)
   const [, setFontsReady] = useState(0)
+  const [confirmClear, setConfirmClear] = useState(false)
 
   const interaction = useRef<Interaction>({ kind: 'none' })
+  const pointers = useRef(new Map<number, { x: number; y: number }>())
+  const pinch = useRef<Pinch | null>(null)
   const snapshot = useRef<SkrawlElement[]>(elements)
   const past = useRef<SkrawlElement[][]>([])
   const future = useRef<SkrawlElement[][]>([])
@@ -283,6 +295,22 @@ export default function App() {
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (editor) return // the textarea's blur commits it
     e.currentTarget.setPointerCapture(e.pointerId)
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (pointers.current.size >= 2) {
+      // A second finger turns the gesture into pinch-zoom: undo whatever the first finger started.
+      if (pointers.current.size === 2) {
+        const [a, b] = [...pointers.current.values()]
+        setScene(snapshot.current)
+        interaction.current = { kind: 'none' }
+        pinch.current = {
+          dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+          midX: (a.x + b.x) / 2,
+          midY: (a.y + b.y) / 2,
+          view: viewRef.current,
+        }
+      }
+      return
+    }
     const { x, y } = toWorld(e.clientX, e.clientY)
     snapshot.current = elementsRef.current
 
@@ -331,6 +359,19 @@ export default function App() {
   }
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const p = pinch.current
+    if (p && pointers.current.size >= 2) {
+      const [a, b] = [...pointers.current.values()]
+      const zoom = clamp(p.view.zoom * (Math.hypot(a.x - b.x, a.y - b.y) / p.dist), MIN_ZOOM, MAX_ZOOM)
+      const midX = (a.x + b.x) / 2
+      const midY = (a.y + b.y) / 2
+      // Keep the world point that was under the fingers' midpoint under it as they move.
+      const wx = p.midX / p.view.zoom - p.view.scrollX
+      const wy = p.midY / p.view.zoom - p.view.scrollY
+      updateView({ zoom, scrollX: midX / zoom - wx, scrollY: midY / zoom - wy })
+      return
+    }
     const action = interaction.current
     if (action.kind === 'none') return
     const v = viewRef.current
@@ -369,7 +410,12 @@ export default function App() {
     }
   }
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    pointers.current.delete(e.pointerId)
+    if (pinch.current) {
+      if (pointers.current.size < 2) pinch.current = null
+      return
+    }
     const action = interaction.current
     interaction.current = { kind: 'none' }
     if (action.kind === 'create') {
@@ -422,9 +468,20 @@ export default function App() {
     })
   }
 
+  // Two-step clear: the first tap arms it, a second tap within 3 seconds clears.
+  useEffect(() => {
+    if (!confirmClear) return
+    const timer = setTimeout(() => setConfirmClear(false), 3000)
+    return () => clearTimeout(timer)
+  }, [confirmClear])
+
   const clearCanvas = () => {
     if (elementsRef.current.length === 0) return
-    if (!window.confirm('Clear the whole canvas? You can undo this.')) return
+    if (!confirmClear) {
+      setConfirmClear(true)
+      return
+    }
+    setConfirmClear(false)
     commit([])
     setSelectedId(null)
   }
@@ -513,14 +570,16 @@ export default function App() {
       </aside>
 
       <div className="menu panel">
-        <button className="text-btn" onClick={exportPng} disabled={elements.length === 0}>
-          Export PNG
-        </button>
+        {CAN_DOWNLOAD && (
+          <button className="text-btn" onClick={exportPng} disabled={elements.length === 0}>
+            Export PNG
+          </button>
+        )}
         <button className="text-btn" onClick={() => setShowGrid((g) => !g)}>
           {showGrid ? 'Hide grid' : 'Show grid'}
         </button>
-        <button className="text-btn" onClick={clearCanvas}>
-          Clear
+        <button className={`text-btn ${confirmClear ? 'danger' : ''}`} onClick={clearCanvas}>
+          {confirmClear ? 'Tap again to clear' : 'Clear'}
         </button>
       </div>
 
@@ -549,7 +608,7 @@ export default function App() {
       {elements.length === 0 && !editor && (
         <div className="welcome">
           <h1>Skrawl</h1>
-          <p>Pick a tool and start sketching. Scroll to pan, Ctrl + scroll to zoom.</p>
+          <p>Pick a tool and start sketching. Scroll or use the hand tool to pan; Ctrl + scroll or pinch to zoom.</p>
         </div>
       )}
 
